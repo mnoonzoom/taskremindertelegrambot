@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"os"
 	"time"
 
 	tgClient "read-adviser-bot/clients/telegram"
@@ -16,44 +17,43 @@ import (
 )
 
 const (
-	tgBotHost           = "api.telegram.org"
-	batchSize           = 100
-	mongoURI            = "mongodb://localhost:27017"
-	mongoDBName         = "read_adviser_bot"
-	mongoCollectionName = "pages"
+	tgBotHost   = "api.telegram.org"
+	batchSize   = 100
+	dbName      = "read_adviser_bot" 
+	collection  = "pages"            
 )
 
 func main() {
-	// Контекст для подключения
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	// === Подключение к MongoDB ===
+	mongoURI := os.Getenv("MONGO_URI")
+	if mongoURI == "" {
+		log.Fatal("MONGO_URI is not set")
+	}
+
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
-		log.Fatal("can't connect to mongo: ", err)
+		log.Fatal("can't connect to mongo atlas: ", err)
 	}
 
-	// Проверка соединения
 	if err := client.Ping(ctx, nil); err != nil {
-		log.Fatal("can't ping mongo: ", err)
+		log.Fatal("can't ping mongo atlas: ", err)
 	}
 
-	// Берём базу и коллекцию
-	db := client.Database(mongoDBName)
-	col := db.Collection(mongoCollectionName)
+	log.Println("Connected to MongoDB Atlas")
 
-	// === Инициализируем Mongo Storage ===
-	s := mongoStorage.New(col)
+	db := client.Database(dbName)
+	col := db.Collection(collection)
 
-	if err := s.Init(ctx); err != nil {
+	storage := mongoStorage.New(col)
+	if err := storage.Init(ctx); err != nil {
 		log.Fatal("can't init storage: ", err)
 	}
 
-	// === Telegram Processor ===
 	eventsProcessor := telegram.New(
 		tgClient.New(tgBotHost, mustToken()),
-		s,
+		storage,
 	)
 
 	log.Print("service started")
@@ -61,11 +61,10 @@ func main() {
 	consumer := event_consumer.New(eventsProcessor, eventsProcessor, batchSize)
 
 	if err := consumer.Start(); err != nil {
-		log.Fatal("service is stopped: ", err)
+		log.Fatal("service is stopped", err)
 	}
 }
 
-// Получение TG токена
 func mustToken() string {
 	token := flag.String(
 		"tg-bot-token",
