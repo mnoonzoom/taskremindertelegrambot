@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
 	"time"
 
@@ -16,52 +17,59 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const (
-	tgBotHost   = "api.telegram.org"
-	batchSize   = 100
-	dbName      = "read_adviser_bot" 
-	collection  = "pages"            
-)
-
 func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
 	mongoURI := os.Getenv("MONGO_URI")
 	if mongoURI == "" {
-		log.Fatal("MONGO_URI is not set")
+		log.Fatal("MONGO_URI not set")
 	}
 
 	client, err := mongo.Connect(ctx, options.Client().ApplyURI(mongoURI))
 	if err != nil {
-		log.Fatal("can't connect to mongo atlas: ", err)
+		log.Fatal("can't connect to mongo atlas:", err)
 	}
 
 	if err := client.Ping(ctx, nil); err != nil {
-		log.Fatal("can't ping mongo atlas: ", err)
+		log.Fatal("can't ping mongo atlas:", err)
 	}
 
 	log.Println("Connected to MongoDB Atlas")
 
-	db := client.Database(dbName)
-	col := db.Collection(collection)
+	db := client.Database("read_adviser_bot")
+	col := db.Collection("pages")
 
 	storage := mongoStorage.New(col)
 	if err := storage.Init(ctx); err != nil {
-		log.Fatal("can't init storage: ", err)
+		log.Fatal("can't init storage:", err)
 	}
 
 	eventsProcessor := telegram.New(
-		tgClient.New(tgBotHost, mustToken()),
+		tgClient.New("api.telegram.org", mustToken()),
 		storage,
 	)
 
-	log.Print("service started")
+	consumer := event_consumer.New(eventsProcessor, eventsProcessor, 100)
 
-	consumer := event_consumer.New(eventsProcessor, eventsProcessor, batchSize)
+	go func() {
+		if err := consumer.Start(); err != nil {
+			log.Fatal("bot stopped:", err)
+		}
+	}()
 
-	if err := consumer.Start(); err != nil {
-		log.Fatal("service is stopped", err)
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Bot is running.\n"))
+	})
+
+	log.Println("HTTP server running on port", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatal(err)
 	}
 }
 
