@@ -72,19 +72,10 @@ func main() {
 		log.Fatal(err)
 	}
 }
-
 func mustToken() string {
-	token := flag.String(
-		"tg-bot-token",
-		"",
-		"token for access to telegram bot",
-	)
-
-	flag.Parse()
-
-	if *token == "" {
-		log.Fatal("token is not specified")
+	token := os.Getenv("TELEGRAM_TOKEN")
+	if token == "" {
+		log.Fatal("TELEGRAM_TOKEN not set")
 	}
-
-	return *token
+	return token
 }
